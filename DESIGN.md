@@ -1,12 +1,12 @@
-# ContextGraph Append CLI
+# Ledger
 
 ## Purpose and Scope
 
-Provide one short-lived Swift executable that appends JSONL safely while Agents
-continue running concurrently. Reading and interpreting JSONL belong to Agents.
-The CLI does not understand moments, nodes, edges, inference or graph merging.
+Provide one short-lived Swift executable that appends JSONL safely while independent callers
+continue running concurrently. Reading and interpreting JSONL belong to callers.
+The CLI treats JSON objects as opaque; callers own schema and application semantics.
 
-This is the independent system and Swift package design root; parent: none. Its internal child is [Append](Sources/ContextGraphCLI/Append/DESIGN.md). Existing
+This is the independent system and Swift package design root; parent: none. Its internal child is [Append](Sources/LedgerCLI/Append/DESIGN.md). Existing
 runtime/application designs remain authorities for their implementations. The
 storage transport uses object-generation preconditions; the mounted filesystem
 does not supply distributed locking.
@@ -15,34 +15,31 @@ does not supply distributed locking.
 
 | Owner | Contract |
 |---|---|
-| Agent | Read paths, interpret records, create payload and stable operation ID |
+| Caller | Read paths, interpret records, create payload and stable operation ID |
 | CLI | Validate record framing, append atomically, handle contention/retries, report outcome |
-| Runtime Worker | Install executable, supply trusted storage mapping and workload identity |
+| Runtime owner | Install executable, supply trusted storage mapping and workload identity |
 | Storage | Arbitrate writes to the same object and publish complete object generations |
 
-The synchronization key is the resolved file, not Agent, Run, Session or Target.
-Independent files remain independent. Reading several graphs does not acquire
+The synchronization key is the resolved file, not caller process or application entity.
+Independent files remain independent. Reading several logs does not acquire
 locks and does not create a multi-file transaction.
-
-## Integration Parent
-
-This independent package produces the binary installed by the [EI Agent Runtime](https://github.com/salescore-inc/ei/blob/deploy/dev/agents/DESIGN.md).
-The standalone implementation was verified before integration. Package tests own
-CLI JSON validation, append CAS and failure feedback; Target domain projection
-belongs to [EI ContextGraph](https://github.com/salescore-inc/ei/blob/deploy/dev/apps/vi/libs/context/ContextGraph/DESIGN.md).
 
 ## Related Designs
 
-- Used by: [EI Agents](https://github.com/salescore-inc/ei/blob/deploy/dev/agents/DESIGN.md), which builds and configures the executable.
-- Child: [Append](Sources/ContextGraphCLI/Append/DESIGN.md), the conditional append implementation.
-- Used by: [Target ContextGraph](https://github.com/salescore-inc/ei/blob/deploy/dev/apps/vi/libs/context/ContextGraph/DESIGN.md), which defines domain additions and projection.
+| Design | Relationship | Contract Used |
+|---|---|---|
+| [Append](Sources/LedgerCLI/Append/DESIGN.md) | child | Input framing, path mapping, conditional append and bounded transport |
+
+Consumers own workload configuration, mounted storage, payload semantics and
+application-specific projections. No consumer application's schema or lifecycle
+is part of Ledger's public contract.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[Parent / child Agents] -->|read path| F[Mounted JSONL]
-    B[Agents in other Attempts] -->|read path| F
+    A[Caller processes] -->|read path| F[Mounted JSONL]
+    B[Other instances] -->|read path| F
     A -->|path + JSON| C[Swift CLI invocation]
     B -->|path + JSON| D[Swift CLI invocation]
     C -->|conditional append commit| O[Same Cloud Storage object]
@@ -50,7 +47,7 @@ flowchart LR
     O --> F
 ```
 
-The Agent-facing interface is a local command taking a filesystem path. There is
+The caller-facing interface is a local command taking a filesystem path. There is
 no daemon, HTTP listener, MCP service, Firestore dependency or language-runtime
 dependency for the binary. Reading requires no CLI command.
 
@@ -74,7 +71,7 @@ writes use a provider atomic primitive internally. The user authorized implement
 ### CLI and records
 
 ```text
-contextgraph append <absolute-jsonl-path> --id <operation-uuid> < record.json
+ledger append <absolute-jsonl-path> --id <operation-uuid> < record.json
 ```
 
 `record.json` contains one UTF-8 JSON object. The CLI validates syntax, input
@@ -88,15 +85,15 @@ Each stored line has this envelope:
 |---|---|
 | `id` | Caller-chosen operation UUID, retained unchanged on retry |
 | `hash` | CLI-computed SHA-256 of the exact accepted input bytes |
-| `data` | Agent-provided JSON object, opaque to the CLI |
+| `data` | Caller-provided JSON object, opaque to the CLI |
 
 Input must be a single physical JSON line, optionally followed by one LF. Strip
 only that optional LF for hashing/storage; reject whitespace outside the root object and preserve all accepted bytes. Payload nesting is bounded to 64 levels (root depth zero; all values have depth below 64); the storage envelope adds one level. The CLI
 adds the envelope and final LF without decoding/re-encoding numeric values.
-The `data` field remains ordinary readable JSON. There is no CLI-assigned graph
-index, timestamp, graph identity, entity ID or semantic merge.
+The `data` field remains ordinary readable JSON. There is no CLI-assigned application
+index, timestamp, entity identity or semantic merge.
 
-All records belonging to one logical addition may be grouped by the Agent in
+All records belonging to one logical addition may be grouped by the caller in
 one payload. The CLI treats the whole payload as one atomic append.
 
 ### Commit guarantees
@@ -149,21 +146,21 @@ B reads v7 ── write rejected ── reads v8 ── commits A + B as v9
 ```
 
 There is no lock owner, lock expiry or lock cleanup. This is optimistic write
-serialization, not a critical section that blocks an Agent while it reasons.
+serialization, not a critical section that blocks a caller during computation.
 Process termination before commit leaves the object unchanged; termination after
 commit but before acknowledgment is resolved by the stable operation ID.
 
 Mounted readers may retain an older view through caching. They are not part of
 the write protocol and do not acknowledge commits. Partial local read buffers or
 stale mounted descriptors are not promised to be fresh transactional snapshots;
-Agent readers must handle read errors. No cross-file snapshot guarantee exists.
+Readers must handle read errors. No cross-file snapshot guarantee exists.
 
 ## State, Ownership, and Lifecycle
 
 SwiftPM builds a standalone Linux amd64 executable using a pinned stable Swift
 toolchain and matching Static Linux SDK. Copy it into the Runtime Worker image
-and place it on PATH. It inherits normal process input/output and exits after
-one operation. No TypeScript library is required for Agent invocation.
+and place it on PATH as `ledger`. It inherits normal process input/output and exits after
+one operation. No TypeScript library is required for invocation.
 
 Use Foundation for files/JSON and FoundationNetworking for bounded HTTPS.
 Use a maintained portable SHA-256 implementation, pinning its package version;
@@ -174,8 +171,8 @@ The container must include CA certificates.
 
 CLI arguments contain only the file path and operation ID. Accept normalized
 absolute `.jsonl` paths inside configured mounts; reject traversal and symlink
-aliases. Configuration is installed by the runtime owner, not read from Agent-
-writable graph files. The mapping does not restrict a command to one Target.
+aliases. Configuration is installed by the runtime owner, not read from caller-
+writable data files. The mapping allows independent files within the configured mount.
 
 The bucket and mount root must be explicitly supplied in trusted configuration. Local
 filesystem correctness is not proof for Cloud Storage. A future local backend
@@ -207,16 +204,14 @@ before release; no production capacity claim is made by this design.
 | Atomic publication | Storage reads during upload return complete old or new generations |
 | Bounded failures | Malformed input/log, denied access, contention and deadlines do not overwrite or loop indefinitely |
 | Independent files | Writes to different paths are not serialized through a global lock |
-| Runtime integration | Parent and child Agents actually invoke the same installed Swift binary using paths |
+| Runtime integration | Independent callers invoke the installed binary against a real shared object |
 
 Every test uses a timeout. macOS tests, local file locks and fake storage tests
 cannot replace the Cloud Run/GCS evidence. See [README](README.md#verification) for the exact evidence and remaining blockers.
 
-The CLI remains opaque to domain semantics. Runtime installation, canonical
-Target paths, legacy JSON compatibility and Activity deletion are integration
-contracts owned by [EI ContextGraph](https://github.com/salescore-inc/ei/blob/deploy/dev/apps/vi/libs/context/ContextGraph/DESIGN.md).
-Repository separation changes packaging only; runtime configuration, commit
-ordering and structured failure feedback remain unchanged.
+Repository separation retains payload framing, conditional writes and error
+feedback. Consumers must invoke `ledger append` and provide `LEDGER_CONFIG`;
+any application-specific compatibility command belongs to that consumer.
 
 ### Provider evidence
 
@@ -227,7 +222,7 @@ ordering and structured failure feedback remain unchanged.
 - [Object atomicity and caching](https://docs.cloud.google.com/storage/docs/consistency):
   single-object operations are atomic; caching and unpinned ranged reads need care.
 
-### Agent error feedback
+### Caller error feedback
 
 Errors are one JSON object on stderr; numeric exit codes remain unchanged.
 `code`, `message`, `retryAction`, `commitState`, and `stage` guide the caller.
@@ -246,11 +241,8 @@ after confirmation report `committed`. JSON validation precedes authentication.
 This repository owns [Dockerfile](Dockerfile) and [binary CI](.github/workflows/build.yml).
 The producer pins Swift 6.4.0 and its matching checksummed Static Linux SDK,
 runs package tests, verifies the standalone Linux amd64 executable without
-Swift installed, and exports the executable plus SHA-256 checksum. Independent
-CI publishes a commit-named archive. EI pins a source commit as a Git submodule
-and invokes this same producer; EI owns image packaging and workload deployment.
-Runtime image builds receive the tested bytes through the `contextgraph-binary`
-named build context and never compile Swift. No mutable latest artifact is used.
-Bootstrap supplies the Organization bucket mapping and limits; Runtime creates
-the private configuration file and supplies `CONTEXTGRAPH_CONFIG`. Domain prompts
-and application JSONL projection/deletion remain EI responsibilities.
+Swift installed, and exports the executable plus SHA-256 checksum. CI publishes
+a commit-named archive. Consumers pin a source commit or its exact artifact and
+verify the checksum before packaging it into their runtime image. Consumers
+own image deployment, CA certificates, workload identity, mounted storage and
+private `LEDGER_CONFIG` configuration. No moving latest artifact is selected.

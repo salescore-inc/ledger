@@ -1,4 +1,4 @@
-name: Build ContextGraph binary
+name: Build Ledger binary
 
 on:
   push:
@@ -19,13 +19,13 @@ jobs:
       - name: Test and build standalone Linux binary
         run: |
           set -euo pipefail
-          docker buildx build --platform linux/amd64 --target contextgraph-binary \
-            --output "type=local,dest=$RUNNER_TEMP/contextgraph-binary" .
-          tar -czf "$RUNNER_TEMP/contextgraph-linux-amd64.tar.gz" \
-            -C "$RUNNER_TEMP/contextgraph-binary" contextgraph contextgraph.sha256
+          docker buildx build --platform linux/amd64 --target ledger-binary \
+            --output "type=local,dest=$RUNNER_TEMP/ledger-binary" .
+          tar -czf "$RUNNER_TEMP/ledger-linux-amd64.tar.gz" \
+            -C "$RUNNER_TEMP/ledger-binary" ledger ledger.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: contextgraph-linux-amd64-${{ github.sha }}
-          path: ${{ runner.temp }}/contextgraph-linux-amd64.tar.gz
+          name: ledger-linux-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/ledger-linux-amd64.tar.gz
           if-no-files-found: error
           compression-level: 0

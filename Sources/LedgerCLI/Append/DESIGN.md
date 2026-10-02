@@ -5,13 +5,13 @@ The internal component of the [CLI package](../../../DESIGN.md). No children.
 Owns input framing, path resolution, conditional append and bounded REST I/O.
 
 ## Responsibilities and Boundaries
-Agent owns JSON meaning. `ObjectStore` owns generation-pinned reads/conditional
+Caller owns JSON meaning. `ObjectStore` owns generation-pinned reads/conditional
 writes. `Appender` owns operation identity and retry outcomes. `HTTPTransport`
 owns a single bounded network request and its cancellation cleanup.
 
 ## Related Designs
 Parent: [package](../../../DESIGN.md), which owns the public CLI contract.
-Used by: executable entry point. Tests: [test target](../../../Tests/ContextGraphCLITests).
+Used by: executable entry point. Tests: [test target](../../../Tests/LedgerCLITests).
 
 ## Architecture
 `Command -> Configuration / JSONRecord -> Appender -> ObjectStore -> HTTPTransport`

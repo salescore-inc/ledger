@@ -15,8 +15,8 @@ for (let index = 0; index < elf.readUInt16LE(56); index++) {
   assert.notEqual(elf.readUInt32LE(table + index * elf.readUInt16LE(54)), 3,
     'Standalone binary must not require a dynamic interpreter');
 }
-assert.match(execFileSync(binary, ['--help'], { encoding: 'utf8', timeout: 10000 }), /contextgraph append/);
-const root = mkdtempSync(join(tmpdir(), 'contextgraph-binary-'));
+assert.match(execFileSync(binary, ['--help'], { encoding: 'utf8', timeout: 10000 }), /ledger append/);
+const root = mkdtempSync(join(tmpdir(), 'ledger-binary-'));
 try {
   const config = join(root, 'config.json');
   writeFileSync(config, JSON.stringify({ mountRoot: root, bucket: 'binary-smoke',
@@ -24,7 +24,7 @@ try {
   const result = spawnSync(binary, ['append', join(root, 'graph.jsonl'), '--id',
     '6e8b4332-0d5c-4f69-9d9d-516c0a2c65dd'], {
     input: '{"broken":}', encoding: 'utf8', timeout: 10000,
-    env: { ...process.env, CONTEXTGRAPH_CONFIG: config },
+    env: { ...process.env, LEDGER_CONFIG: config },
   });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 2);

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-FROM --platform=$BUILDPLATFORM swift:6.4.0 AS contextgraph-build
-WORKDIR /contextgraph
+FROM --platform=$BUILDPLATFORM swift:6.4.0 AS ledger-build
+WORKDIR /ledger
 RUN apt-get update && apt-get install --no-install-recommends --yes curl ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/*
 # Keep SDK download outside SwiftPM's networking lifetime.
@@ -11,23 +11,23 @@ RUN curl --fail --silent --show-error --location --max-time 300 \
     && echo '47d2fd89eebfdf9eb4d536b6710414297f755c17926cdebc4742c08982b40a9e /tmp/swift-sdk.tar.gz' | sha256sum --check \
     && swift sdk install /tmp/swift-sdk.tar.gz \
     && rm /tmp/swift-sdk.tar.gz
-COPY Package.swift contextgraph-cli/Package.resolved ./
+COPY Package.swift Package.resolved ./
 COPY Sources ./Sources
 COPY Tests ./Tests
 COPY scripts ./scripts
 RUN timeout 240s swift test -j 4
 RUN swift build --swift-sdk x86_64-swift-linux-musl -c release -j 4 \
-    && cp "$(swift build --swift-sdk x86_64-swift-linux-musl -c release --show-bin-path)/contextgraph" /contextgraph/contextgraph \
-    && sha256sum contextgraph > contextgraph.sha256
+    && cp "$(swift build --swift-sdk x86_64-swift-linux-musl -c release --show-bin-path)/ledger" /ledger/ledger \
+    && sha256sum ledger > ledger.sha256
 
 # Validate the distributable without a Swift installation.
-FROM node:24-bookworm-slim AS contextgraph-binary-test
+FROM node:24-bookworm-slim AS ledger-binary-test
 WORKDIR /binary
-COPY --from=contextgraph-build /contextgraph/contextgraph /contextgraph/contextgraph.sha256 ./
+COPY --from=ledger-build /ledger/ledger /ledger/ledger.sha256 ./
 COPY binary.smoke.mjs ./
-RUN sha256sum --check contextgraph.sha256 && node binary.smoke.mjs ./contextgraph
+RUN sha256sum --check ledger.sha256 && node binary.smoke.mjs ./ledger
 
-# contextgraph-binary exports a standalone executable and checksum.
-FROM scratch AS contextgraph-binary
-COPY --from=contextgraph-binary-test /binary/contextgraph /binary/contextgraph.sha256 /
+# ledger-binary exports a standalone executable and checksum.
+FROM scratch AS ledger-binary
+COPY --from=ledger-binary-test /binary/ledger /binary/ledger.sha256 /
 

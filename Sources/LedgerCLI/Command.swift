@@ -15,13 +15,13 @@ struct Command {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
             if args == ["--help"] {
-                print("Usage: contextgraph append <absolute-jsonl-path> --id <uuid> < record.json")
-                print("Configuration: CONTEXTGRAPH_CONFIG or /etc/contextgraph.json")
+                print("Usage: ledger append <absolute-jsonl-path> --id <uuid> < record.json")
+                print("Configuration: LEDGER_CONFIG or /etc/ledger.json")
                 return
             }
-            guard args.count == 4, args[0] == "append", args[2] == "--id" else { throw CLIError(code: "invalid_input", message: "Usage: contextgraph append <absolute-jsonl-path> --id <uuid> < record.json") }
+            guard args.count == 4, args[0] == "append", args[2] == "--id" else { throw CLIError(code: "invalid_input", message: "Usage: ledger append <absolute-jsonl-path> --id <uuid> < record.json") }
             stage = "configuration"
-            let configPath = ProcessInfo.processInfo.environment["CONTEXTGRAPH_CONFIG"] ?? "/etc/contextgraph.json"
+            let configPath = ProcessInfo.processInfo.environment["LEDGER_CONFIG"] ?? "/etc/ledger.json"
             let configFile = try FileHandle(forReadingFrom: URL(fileURLWithPath: configPath))
             let configData = try configFile.read(upToCount: 65537) ?? Data()
             try configFile.close()

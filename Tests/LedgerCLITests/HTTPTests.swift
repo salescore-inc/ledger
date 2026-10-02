@@ -3,7 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 import Testing
-@testable import ContextGraphCLI
+@testable import LedgerCLI
 
 @Suite(.timeLimit(.minutes(1)))
 struct HTTPTests {
