@@ -1,0 +1,31 @@
+name: Build ContextGraph binary
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Test and build standalone Linux binary
+        run: |
+          set -euo pipefail
+          docker buildx build --platform linux/amd64 --target contextgraph-binary \
+            --output "type=local,dest=$RUNNER_TEMP/contextgraph-binary" .
+          tar -czf "$RUNNER_TEMP/contextgraph-linux-amd64.tar.gz" \
+            -C "$RUNNER_TEMP/contextgraph-binary" contextgraph contextgraph.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contextgraph-linux-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/contextgraph-linux-amd64.tar.gz
+          if-no-files-found: error
+          compression-level: 0
