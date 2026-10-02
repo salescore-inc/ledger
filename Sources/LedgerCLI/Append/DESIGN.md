@@ -6,7 +6,9 @@ Owns input framing, path resolution, conditional append and bounded REST I/O.
 
 ## Responsibilities and Boundaries
 Caller owns JSON meaning. `ObjectStore` owns generation-pinned reads/conditional
-writes. `Appender` owns operation identity and retry outcomes. `HTTPTransport`
+writes. A pinned body that disappears returns `CLIError(code: "contention")`;
+`read` issues at most one metadata/body pair and never retries internally.
+`Appender` owns operation identity, the shared attempt budget, backoff and retry outcomes. `HTTPTransport`
 owns a single bounded network request and its cancellation cleanup.
 
 ## Related Designs
@@ -36,8 +38,25 @@ locations never include input fragments. See the parent error-feedback contract.
 
 Completed delegates release response buffers; only the returned response owns
 its body. The one-shot process retains request sessions until exit; request count is
-bounded by the configured retry budget. Each session owns its request delegate
+bounded by the configured retry budget: at most `3 * maxAttempts + 3`
+HTTP requests per invocation, including metadata authentication and final
+reconciliation. Each generation-disappearance read consumes an append attempt
+and shares the existing deadline/backoff. No separate nested retry limit exists. Each session owns its request delegate
 and Mutex state. A task deadline cancels streaming as well as idle requests.
 Session invalidation is avoided after a confirmed Static Linux SDK libcurl
 teardown abort in dev Cloud Run. Session-level delegates are used because task
 delegates did not complete HTTP requests on the tested Static Linux SDK.
+
+Token acquisition checks the invocation budget before either credential path and
+before returning a token. Local token-file access is bounded in bytes and uses
+cooperative deadline/cancellation checks before and after synchronous I/O;
+metadata authentication uses the bounded HTTP transport. No successful token is
+returned after a detected deadline or cancellation.
+
+`CloudObjectStoreTests` injects a per-instance HTTP sender to exercise the actual
+GCS request construction and status handling. The production sender remains
+`HTTPTransport.send`; URLs and credentials are not caller-configurable through
+this test seam. Tests cover repeated disappearing generations, recovery,
+conditional upload parameters, unknown uploads followed by read conflicts, and
+valid/expired/cancelled token reads. All fixtures have isolated actor state and
+UUID-named temporary files; no shared mutable test configuration is installed.

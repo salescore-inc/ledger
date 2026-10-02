@@ -130,7 +130,8 @@ error code: do not report definitely-uncommitted failure after an ambiguous uplo
 1. Validate path and bounded stdin before issuing a mutation.
 2. Resolve bucket/object using trusted mount configuration.
 3. Read current generation and generation-pinned bytes via the REST API. Retry
-   if the selected generation disappears. A genuinely absent object is empty.
+   if the selected generation disappears, consuming the same append attempt
+   budget and backoff. A genuinely absent object is empty.
 4. Validate JSONL framing/envelopes and check the operation ID. Equal ID/hash
    returns success; unequal hash returns a conflict.
 5. Construct `existing bytes + complete envelope line + LF`.
@@ -191,6 +192,8 @@ uploads, backoff and reconciliation. Enforce file limits from metadata and actua
 streamed bytes, and reject oversized candidate output before upload. Select
 values from measured current files and the container's memory/time envelope
 before release; no production capacity claim is made by this design.
+Generation-disappearance retries and their request bound are owned by the
+[Append contract](Sources/LedgerCLI/Append/DESIGN.md).
 
 ## Verification and Change Impact
 

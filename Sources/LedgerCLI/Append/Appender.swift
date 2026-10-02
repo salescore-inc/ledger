@@ -34,7 +34,12 @@ struct Appender {
             do {
                 try budget.check()
                 stage = "read"
-                let snapshot = try await store.read(budget: budget)
+                let snapshot: Snapshot
+                do { snapshot = try await store.read(budget: budget) }
+                catch let error as CLIError where error.code == "contention" {
+                    if attempt + 1 < maxAttempts { try await backoff(after: attempt, budget: budget) }
+                    continue
+                }
                 guard snapshot.bytes.count <= maxFileBytes else { throw CLIError.size(limit: maxFileBytes, actual: snapshot.bytes.count) }
                 stage = "validate_log"
                 if try record.isPresent(in: snapshot.bytes) {
@@ -60,8 +65,7 @@ struct Appender {
                     uncertain = true
                 }
                 if attempt + 1 < maxAttempts {
-                    let delay = min(Double.random(in: 0.01...0.1) * Double(attempt + 1), 1, budget.remaining)
-                    if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
+                    try await backoff(after: attempt, budget: budget)
                 }
             } catch {
                 var failure = uncertain ? CLIError(code: "outcome_unknown") : ((error as? CLIError) ?? CLIError(code: "io_error"))
@@ -84,5 +88,10 @@ struct Appender {
             throw CLIError(code: "outcome_unknown")
         }
         throw CLIError(code: "contention")
+    }
+
+    private func backoff(after attempt: Int, budget: Budget) async throws {
+        let delay = min(Double.random(in: 0.01...0.1) * Double(attempt + 1), 1, budget.remaining)
+        if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
     }
 }
