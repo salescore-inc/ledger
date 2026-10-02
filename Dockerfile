@@ -15,7 +15,8 @@ COPY Package.swift Package.resolved ./
 COPY Sources ./Sources
 COPY Tests ./Tests
 COPY scripts ./scripts
-RUN timeout 240s swift test -j 4
+RUN timeout 240s swift build --build-tests -j 4
+RUN scripts/swift-test-hang-guard.sh --repeats 2 --timeout 30 -- --skip-build
 RUN swift build --swift-sdk x86_64-swift-linux-musl -c release -j 4 \
     && cp "$(swift build --swift-sdk x86_64-swift-linux-musl -c release --show-bin-path)/ledger" /ledger/ledger \
     && sha256sum ledger > ledger.sha256

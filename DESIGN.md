@@ -206,7 +206,10 @@ before release; no production capacity claim is made by this design.
 | Independent files | Writes to different paths are not serialized through a global lock |
 | Runtime integration | Independent callers invoke the installed binary against a real shared object |
 
-Every test uses a timeout. macOS tests, local file locks and fake storage tests
+Every test uses a timeout. Build and test execution have separate deadlines;
+`scripts/swift-test-hang-guard.sh` bounds warm runs and checks synchronous
+deinit shutdown. The HTTP fixture unblocks inherited SIGTERM so its owning
+Swift test can terminate and reap it on Linux and macOS. macOS tests, local file locks and fake storage tests
 cannot replace the Cloud Run/GCS evidence. See [README](README.md#verification) for the exact evidence and remaining blockers.
 
 Repository separation retains payload framing, conditional writes and error
