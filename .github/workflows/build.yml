@@ -3,7 +3,10 @@ name: Build Ledger binary
 on:
   push:
     branches: [main]
+    tags: ['v*']
+    paths-ignore: ['Formula/**', 'PROGRESS.md']
   pull_request:
+    paths-ignore: ['Formula/**', 'PROGRESS.md']
   workflow_dispatch:
 
 permissions:
@@ -11,21 +14,104 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-latest
+          - target: darwin-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify release packaging
+        run: python3 -c 'import subprocess; subprocess.run(["python3","scripts/release-test.py"],check=True,timeout=30)'
       - uses: docker/setup-buildx-action@v3
+        if: matrix.target == 'linux-amd64'
       - name: Test and build standalone Linux binary
+        if: matrix.target == 'linux-amd64'
         run: |
           set -euo pipefail
           docker buildx build --platform linux/amd64 --target ledger-binary \
             --output "type=local,dest=$RUNNER_TEMP/ledger-binary" .
-          tar -czf "$RUNNER_TEMP/ledger-linux-amd64.tar.gz" \
-            -C "$RUNNER_TEMP/ledger-binary" ledger ledger.sha256
+      - uses: swift-actions/setup-swift@v2
+        if: matrix.target == 'darwin-arm64'
+        with:
+          swift-version: '6.4.0'
+      - name: Build and execute macOS binary
+        if: matrix.target == 'darwin-arm64'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '15.0'
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          swift --version
+          python3 -c 'import subprocess; subprocess.run(["swift","build","-c","release","-j","4"],check=True,timeout=600)'
+          mkdir "$RUNNER_TEMP/ledger-binary"
+          cp "$(swift build -c release --show-bin-path)/ledger" "$RUNNER_TEMP/ledger-binary/ledger"
+          env -u DYLD_LIBRARY_PATH -u DYLD_FRAMEWORK_PATH node binary.smoke.mjs "$RUNNER_TEMP/ledger-binary/ledger"
+      - name: Package exact tested binary
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          tag="v$(cat VERSION)"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then test "${GITHUB_REF#refs/tags/}" = "$tag"; fi
+          python3 scripts/package-binary.py --binary "$RUNNER_TEMP/ledger-binary/ledger" \
+            --tag "$tag" --source "$(git rev-parse HEAD)" --target "$TARGET" --output "$RUNNER_TEMP/release"
       - uses: actions/upload-artifact@v4
         with:
-          name: ledger-linux-amd64-${{ github.sha }}
-          path: ${{ runner.temp }}/ledger-linux-amd64.tar.gz
+          name: ledger-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/release/*
           if-no-files-found: error
           compression-level: 0
+
+  assemble:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ledger-*-${{ github.event.pull_request.head.sha || github.sha }}
+          merge-multiple: true
+          path: release
+      - name: Verify target identities and generate Homebrew Formula
+        run: python3 scripts/assemble-release.py release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ledger-release-${{ github.event.pull_request.head.sha || github.sha }}
+          path: release/*
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: assemble
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ledger-release-${{ github.sha }}
+          path: release
+      - name: Publish tested artifacts without replacing an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" release/* --verify-tag --title "Ledger $RELEASE_TAG" --generate-notes

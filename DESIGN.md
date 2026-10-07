@@ -247,8 +247,33 @@ after confirmation report `committed`. JSON validation precedes authentication.
 This repository owns [Dockerfile](Dockerfile) and [binary CI](.github/workflows/build.yml).
 The producer pins Swift 6.4.0 and its matching checksummed Static Linux SDK,
 runs package tests, verifies the standalone Linux amd64 executable without
-Swift installed, and exports the executable plus SHA-256 checksum. CI publishes
-a commit-named archive. Consumers pin a source commit or its exact artifact and
-verify the checksum before packaging it into their runtime image. Consumers
+Swift installed, and exports the executable plus SHA-256 checksum. CI produces versioned Linux amd64 and macOS arm64 archives. A tag release publishes
+only the archives already tested in that workflow, a source/target/checksum manifest,
+and a Homebrew Formula generated from those archive checksums. Consumers pin the
+release tag, source commit, archive SHA-256 and executable SHA-256; EI downloads
+the archive and never builds Swift during application deployment. Consumers
 own image deployment, CA certificates, workload identity, mounted storage and
 private `LEDGER_CONFIG` configuration. No moving latest artifact is selected.
+
+### Binary Release Contract
+
+The package owns binary production and release assets; consumers own installation.
+Release jobs depend on both native target builds and complete focused tests. A
+release tag resolves to exactly the compiled source SHA. Existing releases are
+never overwritten; upload all assets to a draft before publishing. Archives contain
+only regular `ledger`, `ledger.sha256`, and `manifest.json` files. The manifest
+binds schema version, release tag, source SHA, target, and executable SHA-256.
+The combined `release.json` adds archive checksums and asset names. Homebrew
+installs the same tested archive; it does not compile Swift. Unsupported targets
+fail explicitly. macOS requires macOS 15 or newer. CLI framing, storage authority,
+configuration and process lifetime remain unchanged.
+
+```text
+Ledger source/tag -> target builds and binary smoke -> checked release assets
+checked release assets -> EI image assembly / Homebrew installation
+```
+
+Release packaging tests reject changed executable checksums, mismatched source
+identities, incomplete platform sets and mismatched tags. Consumer tests reject
+changed archives, invalid metadata, unexpected archive members and wrong targets.
+The same real binaries are executed on their target platforms before publication.

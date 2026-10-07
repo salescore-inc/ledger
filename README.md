@@ -29,29 +29,47 @@ Never commit credentials or allow untrusted callers to replace configuration.
 
 ## Build and install
 
-The [Dockerfile](Dockerfile) pins Swift 6.4.0 and its checksummed Static Linux SDK.
-It runs native Swift tests and verifies the static Linux amd64 executable without
-a Swift installation. [CI](.github/workflows/build.yml) distributes the
-`ledger-linux-amd64-<commit-sha>` artifact.
+The binary producer uses Swift 6.4.0. Linux amd64 uses the matching checksummed
+Static Linux SDK and is tested without a Swift installation. macOS arm64 is built
+and executed on macOS 15. [CI](.github/workflows/build.yml) packages both targets,
+checks their identities and publishes tested artifacts when a `vX.Y.Z` tag is pushed.
+`VERSION` must match the tag. Existing releases are never replaced.
+
+Each release contains versioned archives, `release.json` with source/target/archive
+and executable SHA-256 identities, and a generated binary-only `ledger.rb` Formula.
+Consumers pin those identities instead of compiling Swift during their deployment.
+
+### Linux / Docker
+
+Download the exact `ledger-vX.Y.Z-linux-amd64.tar.gz` release asset, verify the
+archive checksum against your committed release pin, unpack it, verify
+`ledger.sha256`, and install `ledger` on PATH during image assembly. The binary
+needs CA certificates and trusted `LEDGER_CONFIG`; it needs no Swift compiler or
+runtime package. Runtime startup does not download or build tools.
+
+### Homebrew
+
+The generated Formula is committed to `Formula/ledger.rb` when promoting a tested
+release. It installs the same archive used by other consumers, with a fixed URL
+and SHA-256. Supported targets are Linux amd64 and macOS 15+ on Apple Silicon.
 
 ```sh
-docker buildx build --platform linux/amd64 --target ledger-binary \
-  --output type=local,dest=/tmp/ledger-binary .
-tar -czf /tmp/ledger-linux-amd64.tar.gz \
-  -C /tmp/ledger-binary ledger ledger.sha256
+brew tap salescore-inc/ledger https://github.com/salescore-inc/ledger.git
+brew install salescore-inc/ledger/ledger
+brew test salescore-inc/ledger/ledger
 ```
 
-Install a downloaded archive on Linux amd64:
+### Release process
 
-```sh
-tar -xzf ledger-linux-amd64.tar.gz
-sha256sum --check ledger.sha256
-install -m 0755 ledger /usr/local/bin/ledger
-ledger --help
-```
-
-The installed executable needs no Swift runtime installation. Consumers pin
-source commits or commit-named artifacts and verify the checksum before use.
+Update `VERSION`, review the source, and run the binary CI. To publish an approved
+release, tag that exact tested source and push the tag. The release workflow tests
+and assembles all target artifacts before publication. It publishes a draft with
+all assets before making the release public, using GitHub CLI's release creation
+transaction. Copy the verified `ledger.rb` asset into `Formula/ledger.rb` for the
+Homebrew tap update; this metadata update does not rebuild or change the CLI.
+For initial release promotion, the same verified CI artifacts may be attached to
+the release without rebuilding, with the release tag pointing to their exact
+recorded source SHA.
 
 ## Verification
 
