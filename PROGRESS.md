@@ -1,3 +1,4 @@
 # Progress
-- [x] FIX1 Bound generation-disappearance retries and token deadline/cancellation checks; preserve CAS and sticky unknown outcomes; regression and all 12 macOS tests passed; commit:22a3d4d76f599eccb7b0e93eb658064fdf217d2e `depends:none` `parallel:none`
-- [x] FIX2 Integrated fix verified: all 12 macOS/Linux tests pass, static Linux amd64 binary smoke passes; CI 36964894240, source:22a3d4d76f599eccb7b0e93eb658064fdf217d2e, artifact:11208409825; fix published to origin/main `depends:FIX1` `parallel:none`
+- [x] B1 Implement versioned binary packaging, release automation and generated Homebrew Formula; preserve CLI behavior `depends:none` `parallel:none`
+- [x] B2 Verify actual Linux and macOS executables and publish the fixed release `depends:B1` `parallel:none`
+- [x] B3 Verify release identities, checksums and consumer installation end to end `depends:B1,B2` `parallel:none`

@@ -5,15 +5,24 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const binary = resolve(process.argv[2]);
-const elf = readFileSync(binary);
-assert.equal(elf.subarray(0, 4).toString('hex'), '7f454c46');
-assert.equal(elf[4], 2, 'ELF must be 64-bit');
-assert.equal(elf[5], 1, 'ELF must be little-endian');
-assert.equal(elf.readUInt16LE(18), 62, 'ELF must target x86-64');
-const table = Number(elf.readBigUInt64LE(32));
-for (let index = 0; index < elf.readUInt16LE(56); index++) {
-  assert.notEqual(elf.readUInt32LE(table + index * elf.readUInt16LE(54)), 3,
-    'Standalone binary must not require a dynamic interpreter');
+const bytes = readFileSync(binary);
+if (process.platform === 'linux') {
+  assert.equal(bytes.subarray(0, 4).toString('hex'), '7f454c46');
+  assert.equal(bytes[4], 2, 'ELF must be 64-bit');
+  assert.equal(bytes[5], 1, 'ELF must be little-endian');
+  assert.equal(bytes.readUInt16LE(18), 62, 'ELF must target x86-64');
+  const table = Number(bytes.readBigUInt64LE(32));
+  for (let index = 0; index < bytes.readUInt16LE(56); index++) {
+    assert.notEqual(bytes.readUInt32LE(table + index * bytes.readUInt16LE(54)), 3,
+      'Standalone Linux binary must not require a dynamic interpreter');
+  }
+} else {
+  assert.equal(process.platform, 'darwin');
+  assert.equal(bytes.readUInt32LE(0), 0xfeedfacf, 'Mach-O must be 64-bit');
+  assert.equal(bytes.readUInt32LE(4), 0x0100000c, 'Mach-O must target arm64');
+  const dependencies = execFileSync('/usr/bin/otool', ['-L', binary], {encoding: 'utf8', timeout: 10000});
+  assert.doesNotMatch(dependencies, /\/Library\/Developer|\.xctoolchain/,
+    'Installed binary must not depend on an installed Swift toolchain');
 }
 assert.match(execFileSync(binary, ['--help'], { encoding: 'utf8', timeout: 10000 }), /ledger append/);
 const root = mkdtempSync(join(tmpdir(), 'ledger-binary-'));
@@ -37,4 +46,4 @@ try {
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
-console.log('Standalone Linux amd64 binary and JSON failure passed');
+console.log('Standalone target binary and JSON failure passed');
