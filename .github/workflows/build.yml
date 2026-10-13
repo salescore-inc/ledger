@@ -53,6 +53,8 @@ jobs:
           set -euo pipefail
           test "$(uname -m)" = arm64
           swift --version
+          python3 -c 'import subprocess; subprocess.run(["swift","build","--build-tests","-j","4"],check=True,timeout=240)'
+          scripts/swift-test-hang-guard.sh --repeats 1 --timeout 30 -- --skip-build
           python3 -c 'import subprocess; subprocess.run(["swift","build","-c","release","-j","4"],check=True,timeout=600)'
           mkdir "$RUNNER_TEMP/ledger-binary"
           cp "$(swift build -c release --show-bin-path)/ledger" "$RUNNER_TEMP/ledger-binary/ledger"
