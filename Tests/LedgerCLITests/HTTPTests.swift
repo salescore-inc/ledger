@@ -8,6 +8,10 @@ import Testing
 @Suite(.timeLimit(.minutes(1)))
 struct HTTPTests {
     @Test func boundsRedirectsTimeoutAndCancellation() async throws {
+        func trace(_ stage: String) throws {
+            try FileHandle.standardError.write(contentsOf: Data("HTTP fixture: \(stage)\n".utf8))
+        }
+        try trace("starting")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         let script = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("scripts/http-fixture.py")
@@ -15,13 +19,17 @@ struct HTTPTests {
         let pipe = Pipe()
         process.standardOutput = pipe
         try process.run()
-        defer { process.terminate(); process.waitUntilExit() }
+        defer {
+            do { try trace("terminating") } catch { Issue.record("Diagnostic output failed") }
+            process.terminate(); process.waitUntilExit()
+        }
         var portBytes = Data()
         while let byte = try pipe.fileHandleForReading.read(upToCount: 1), !byte.isEmpty {
             if byte.first == 10 { break }
             portBytes.append(byte)
         }
         let port = try #require(String(data: portBytes, encoding: .utf8))
+        try trace("ready")
         func request(_ path: String, timeout: Double = 2) -> URLRequest {
             var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/\(path)")!)
             request.timeoutInterval = timeout
@@ -29,8 +37,10 @@ struct HTTPTests {
             return request
         }
         let ok = try await HTTPTransport.send(request("ok"), limit: 10)
+        try trace("received ok")
         #expect(ok.status == 200 && ok.body.count == 2)
         let redirect = try await HTTPTransport.send(request("redirect"), limit: 10)
+        try trace("received redirect")
         #expect(redirect.status == 302)
         for path in ["length", "body"] {
             do { _ = try await HTTPTransport.send(request(path), limit: 10); Issue.record("Expected size rejection") }
@@ -42,5 +52,6 @@ struct HTTPTests {
         let task = Task { try await HTTPTransport.send(request("slow"), limit: 10) }
         task.cancel()
         await #expect(throws: (any Error).self) { _ = try await task.value }
+        try trace("requests completed")
     }
 }
