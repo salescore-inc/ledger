@@ -1,20 +1,20 @@
 class Ledger < Formula
   desc "Safe, concurrent JSONL append through Cloud Storage generation preconditions"
   homepage "https://github.com/salescore-inc/ledger"
-  version "0.1.0"
+  version "0.1.1"
   license "MIT"
 
   on_macos do
     depends_on macos: :sequoia
     on_arm do
-      url "https://github.com/salescore-inc/ledger/releases/download/v0.1.0/ledger-v0.1.0-darwin-arm64.tar.gz"
-      sha256 "d5a9e1dab968d400a5c7eaab4457dc53692b8d27b42b3929d248c204b7a2bd3a"
+      url "https://github.com/salescore-inc/ledger/releases/download/v0.1.1/ledger-v0.1.1-darwin-arm64.tar.gz"
+      sha256 "b2fdd59166e95fda481e1f11ee93f7f17a578044643a7a249982ad020638ac5a"
     end
   end
   on_linux do
     on_intel do
-      url "https://github.com/salescore-inc/ledger/releases/download/v0.1.0/ledger-v0.1.0-linux-amd64.tar.gz"
-      sha256 "0392994afe49d9d62ead4e8ec92c8fca83875da755788aee1a2793a0d901b809"
+      url "https://github.com/salescore-inc/ledger/releases/download/v0.1.1/ledger-v0.1.1-linux-amd64.tar.gz"
+      sha256 "3b4dc89a2e1733d85836bc4078b55164a81c7a88cb0dc80c78f906b768bcf0c3"
     end
   end
 
