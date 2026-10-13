@@ -34,6 +34,58 @@ struct JSONRecord {
         return result
     }
 
+    /// Recognizes a legacy snapshot without reinterpreting a damaged envelope.
+    static func normalizedLog(_ log: Data) throws -> Data {
+        if log.isEmpty { return log }
+        var parser = JSONScanner(bytes: log, maximumDepth: 65)
+        parser.whitespace()
+        let start = parser.index
+        do {
+            let fields = try parser.parseObject(depth: 0)
+            if !Set(fields.keys).isDisjoint(with: ["id", "hash", "data"]) { return log }
+            let end = parser.index
+            parser.whitespace()
+            guard parser.index == log.count else {
+                throw CLIError(code: "invalid_log", message: "A legacy snapshot must contain exactly one JSON object.")
+            }
+            guard String(data: log, encoding: .utf8) != nil else {
+                throw CLIError(code: "invalid_log", message: "The existing object is not valid UTF-8.")
+            }
+            var payload = Data()
+            payload.reserveCapacity(end - start)
+            var quoted = false
+            var escaped = false
+            for byte in log[start..<end] {
+                if quoted {
+                    payload.append(byte)
+                    if escaped { escaped = false }
+                    else if byte == 92 { escaped = true }
+                    else if byte == 34 { quoted = false }
+                } else if byte == 34 {
+                    quoted = true
+                    payload.append(byte)
+                } else if ![9, 10, 13, 32].contains(byte) {
+                    payload.append(byte)
+                }
+            }
+            // A content-derived UUID makes concurrent conversions preserve one baseline.
+            let digest = SHA256.hash(data: Data("ledger:legacy-json:v1\0".utf8) + payload)
+            var identity = Array(digest.prefix(16))
+            identity[6] = (identity[6] & 0x0f) | 0x80
+            identity[8] = (identity[8] & 0x3f) | 0x80
+            let uuid = UUID(uuid: (identity[0], identity[1], identity[2], identity[3],
+                                   identity[4], identity[5], identity[6], identity[7],
+                                   identity[8], identity[9], identity[10], identity[11],
+                                   identity[12], identity[13], identity[14], identity[15]))
+            return try JSONRecord(input: payload, id: uuid.uuidString, limit: log.count).line
+        } catch {
+            let cause = error as? CLIError
+            throw CLIError(code: "invalid_log", message: cause?.message ?? "The existing JSON object is invalid.",
+                           location: .init(source: "log", line: 1,
+                                           byteOffset: cause?.location?.byteOffset ?? parser.index))
+        }
+    }
+
     /// Checks the entire log before treating any matching receipt as committed.
     func isPresent(in log: Data) throws -> Bool {
         if log.isEmpty { return false }

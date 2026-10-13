@@ -11,17 +11,25 @@ struct HTTPTests {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         let script = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("scripts/http-fixture.py")
-        process.arguments = ["python3", script.path]
-        let pipe = Pipe()
-        process.standardOutput = pipe
+        let portFile = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        process.arguments = ["python3", script.path, portFile.path]
         try process.run()
-        defer { process.terminate(); process.waitUntilExit() }
-        var portBytes = Data()
-        while let byte = try pipe.fileHandleForReading.read(upToCount: 1), !byte.isEmpty {
-            if byte.first == 10 { break }
-            portBytes.append(byte)
+        defer {
+            process.terminate(); process.waitUntilExit()
+            if FileManager.default.fileExists(atPath: portFile.path) {
+                do { try FileManager.default.removeItem(at: portFile) }
+                catch { Issue.record("Fixture port-file cleanup failed") }
+            }
         }
-        let port = try #require(String(data: portBytes, encoding: .utf8))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !FileManager.default.fileExists(atPath: portFile.path) {
+            guard process.isRunning, ContinuousClock.now < deadline else {
+                throw CLIError(code: "io_error", message: "HTTP fixture did not start within five seconds.")
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let port = try String(contentsOf: portFile, encoding: .utf8)
+        #expect(Int(port) != nil)
         func request(_ path: String, timeout: Double = 2) -> URLRequest {
             var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/\(path)")!)
             request.timeoutInterval = timeout
