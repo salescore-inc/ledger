@@ -17,6 +17,13 @@ the REST API for conditional writes. It has no Storage SDK, daemon or database.
 Payload meaning and domain schema belong to the caller. POSIX files and other
 storage providers are not supported by this backend.
 
+An existing `.jsonl` object may contain a legacy single JSON object. Its first
+successful append converts that object to one preserved envelope and adds the
+new record in the same conditional upload. Pretty-printed JSON is supported;
+numbers and strings retain their token bytes. Root keys `id`, `hash`, `data`
+are reserved for envelopes, whose corruption still fails explicitly. Subsequent
+writes remain JSONL. Ledger does not discover or modify sibling `.json` files.
+
 ## Configuration
 
 Set `LEDGER_CONFIG` to a trusted configuration file; the default is

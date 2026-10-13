@@ -60,3 +60,31 @@ this test seam. Tests cover repeated disappearing generations, recovery,
 conditional upload parameters, unknown uploads followed by read conflicts, and
 valid/expired/cancelled token reads. All fixtures have isolated actor state and
 UUID-named temporary files; no shared mutable test configuration is installed.
+
+## Legacy JSON Compatibility
+
+`JSONRecord` owns stored-format recognition and lexical normalization. A nonempty
+stored object may be one UTF-8 JSON object with leading/trailing whitespace and
+pretty-printing. Its root contains none of the envelope keys `id`, `hash`, `data`.
+Those keys identify an envelope candidate, which retains strict existing JSONL
+validation; broken framing, hashes or envelopes never become legacy payloads.
+Only whitespace outside JSON strings is removed. Duplicate keys, invalid UTF-8,
+invalid syntax, multiple roots, arrays and depth above the payload limit fail.
+Numbers, strings and property order retain their original token bytes.
+
+The legacy object becomes one ordinary envelope with a deterministic UUID derived
+from a domain-separated SHA-256 of its compact payload; its hash covers that
+payload. The UUID's version/variant bits are fixed. Every competing append uses
+the same legacy identity. A caller operation that collides with it fails rather
+than acknowledging an uncommitted snapshot as a successful append.
+
+`Appender` checks the normalized legacy envelope and requested line against
+`maxFileBytes`, then uploads both using the observed generation. A conflict rereads
+and recognizes the committed JSONL. Lost acknowledgments and replay keep the
+original requested ID/bytes and reconcile through the existing receipt contract.
+Deadline/cancellation checks bracket normalization; no mutation starts afterward
+if its existing budget has expired. Writes remain `.jsonl` only. Separate sibling
+`.json` files and cross-file migration remain owned by callers.
+
+`LegacyJSONTests` owns conversion, exact payload preservation, deterministic
+identity, competing first appends, replay, size rejection and corrupt-log refusal.

@@ -76,6 +76,19 @@ struct CloudObjectStoreTests {
         #expect(await fixture.uploads == 1)
     }
 
+    @Test func legacySnapshotUsesTheSamePinnedReadAndConditionalJSONLUpload() async throws {
+        let baseline = Data("{\n\"old\": 9007199254740993\n}\n".utf8)
+        let fixture = StoreHTTPFixture(missingBodies: 0, initialBytes: baseline)
+        let item = try record()
+        let writer = Appender(store: makeStore(fixture), maxFileBytes: 1024, maxAttempts: 1)
+        let receipt = try await writer.append(item, budget: Budget(seconds: 5))
+        #expect(receipt.status == "appended")
+        #expect(await fixture.uploads == 1)
+        let upload = try #require(await fixture.lastUpload)
+        #expect(try upload == JSONRecord.normalizedLog(baseline) + item.line)
+        #expect(try item.isPresent(in: upload))
+    }
+
     private func makeStore(_ fixture: StoreHTTPFixture) -> CloudObjectStore {
         CloudObjectStore(bucket: "test-bucket", object: "folder/日本語 #?.jsonl", token: "test-only-token", maxFileBytes: 1024, send: { request, limit in
             try await fixture.send(request, limit: limit)
@@ -94,9 +107,11 @@ private actor StoreHTTPFixture {
     var metadataReads = 0
     var missingBodies: Int
     let loseUpload: Bool
+    let initialBytes: Data
 
-    init(missingBodies: Int, loseUpload: Bool = false) {
+    init(missingBodies: Int, loseUpload: Bool = false, initialBytes: Data = Data()) {
         self.missingBodies = missingBodies; self.loseUpload = loseUpload
+        self.initialBytes = initialBytes
     }
 
     func send(_ request: URLRequest, limit: Int) throws -> HTTPResponse {
@@ -126,10 +141,10 @@ private actor StoreHTTPFixture {
                 missingBodies -= 1
                 return HTTPResponse(status: 404, body: Data())
             }
-            return HTTPResponse(status: 200, body: Data())
+            return HTTPResponse(status: 200, body: initialBytes)
         }
         metadataReads += 1
         #expect(query["fields"] == "generation,size")
-        return HTTPResponse(status: 200, body: Data("{\"generation\":\"\(metadataReads)\",\"size\":\"0\"}".utf8))
+        return HTTPResponse(status: 200, body: Data("{\"generation\":\"\(metadataReads)\",\"size\":\"\(initialBytes.count)\"}".utf8))
     }
 }

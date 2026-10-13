@@ -104,7 +104,13 @@ one payload. The CLI treats the whole payload as one atomic append.
 - The cloud object exposes complete generations, not a half-uploaded record.
 - Repeating one ID with the same bytes confirms the existing commit; changing
   its bytes returns `id_conflict`.
-- Only append is supported. No truncate, replace, delete, graph merge or compaction.
+- Existing JSONL is append-only. No truncate, delete, graph merge or compaction
+  is supported. The legacy representation conversion below preserves its payload.
+- A canonical `.jsonl` object may initially contain one legacy JSON object.
+  The [Append format contract](Sources/LedgerCLI/Append/DESIGN.md#legacy-json-compatibility)
+  owns its recognition and lossless conversion during the first successful append.
+  That same generation-conditional upload commits the preserved legacy record
+  and the requested record together; it introduces no separate migration write.
 - Guarantees require every writer to follow this protocol. Existing writable
   mounts and shared workload credentials do not prevent deliberate bypass.
 
@@ -132,7 +138,8 @@ error code: do not report definitely-uncommitted failure after an ambiguous uplo
 3. Read current generation and generation-pinned bytes via the REST API. Retry
    if the selected generation disappears, consuming the same append attempt
    budget and backoff. A genuinely absent object is empty.
-4. Validate JSONL framing/envelopes and check the operation ID. Equal ID/hash
+4. Normalize an eligible legacy JSON snapshot to one envelope, then validate
+   JSONL framing/envelopes and check the operation ID. Equal ID/hash
    returns success; unequal hash returns a conflict.
 5. Construct `existing bytes + complete envelope line + LF`.
 6. Upload with `ifGenerationMatch=<observed generation>`; use `0` for creation.

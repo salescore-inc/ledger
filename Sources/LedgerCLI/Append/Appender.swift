@@ -42,14 +42,17 @@ struct Appender {
                 }
                 guard snapshot.bytes.count <= maxFileBytes else { throw CLIError.size(limit: maxFileBytes, actual: snapshot.bytes.count) }
                 stage = "validate_log"
-                if try record.isPresent(in: snapshot.bytes) {
+                let log = try JSONRecord.normalizedLog(snapshot.bytes)
+                try budget.check()
+                if try record.isPresent(in: log) {
+                    guard log == snapshot.bytes else { throw CLIError(code: "id_conflict") }
                     return Receipt(status: "already_present", id: record.id, generation: snapshot.generation)
                 }
                 // An uncertain request can still finish later, so keep its sticky state.
                 stage = "prepare_append"
                 let line = record.line
-                guard line.count <= maxFileBytes - snapshot.bytes.count else { throw CLIError.size(limit: maxFileBytes, actual: snapshot.bytes.count + line.count) }
-                var next = snapshot.bytes
+                guard log.count <= maxFileBytes, line.count <= maxFileBytes - log.count else { throw CLIError.size(limit: maxFileBytes, actual: log.count + line.count) }
+                var next = log
                 next.append(line)
                 try budget.check()
                 do {
