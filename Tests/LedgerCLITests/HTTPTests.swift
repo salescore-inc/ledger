@@ -24,19 +24,6 @@ struct HTTPTests {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while !FileManager.default.fileExists(atPath: portFile.path) {
             guard process.isRunning, ContinuousClock.now < deadline else {
-                #if os(macOS)
-                let sampleFile = portFile.appendingPathExtension("sample")
-                let diagnostic = Process()
-                diagnostic.executableURL = URL(fileURLWithPath: "/usr/bin/sample")
-                diagnostic.arguments = [String(process.processIdentifier), "1", "-file", sampleFile.path]
-                try diagnostic.run()
-                diagnostic.waitUntilExit()
-                if FileManager.default.fileExists(atPath: sampleFile.path) {
-                    let sample = try String(contentsOf: sampleFile, encoding: .utf8)
-                    try FileHandle.standardError.write(contentsOf: Data(sample.utf8))
-                    try FileManager.default.removeItem(at: sampleFile)
-                }
-                #endif
                 throw CLIError(code: "io_error", message: "HTTP fixture did not start within five seconds.")
             }
             try await Task.sleep(for: .milliseconds(20))
