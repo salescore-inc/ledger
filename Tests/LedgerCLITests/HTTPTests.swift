@@ -8,28 +8,26 @@ import Testing
 @Suite(.timeLimit(.minutes(1)))
 struct HTTPTests {
     @Test func boundsRedirectsTimeoutAndCancellation() async throws {
-        func trace(_ stage: String) throws {
-            try FileHandle.standardError.write(contentsOf: Data("HTTP fixture: \(stage)\n".utf8))
-        }
-        try trace("starting")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         let script = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("scripts/http-fixture.py")
-        process.arguments = ["python3", script.path]
-        let pipe = Pipe()
-        process.standardOutput = pipe
+        let portFile = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        process.arguments = ["python3", script.path, portFile.path]
         try process.run()
         defer {
-            do { try trace("terminating") } catch { Issue.record("Diagnostic output failed") }
             process.terminate(); process.waitUntilExit()
+            do { try FileManager.default.removeItem(at: portFile) }
+            catch { Issue.record("Fixture port-file cleanup failed") }
         }
-        var portBytes = Data()
-        while let byte = try pipe.fileHandleForReading.read(upToCount: 1), !byte.isEmpty {
-            if byte.first == 10 { break }
-            portBytes.append(byte)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !FileManager.default.fileExists(atPath: portFile.path) {
+            guard process.isRunning, ContinuousClock.now < deadline else {
+                throw CLIError(code: "io_error", message: "HTTP fixture did not start within five seconds.")
+            }
+            try await Task.sleep(for: .milliseconds(20))
         }
-        let port = try #require(String(data: portBytes, encoding: .utf8))
-        try trace("ready")
+        let port = try String(contentsOf: portFile, encoding: .utf8)
+        #expect(Int(port) != nil)
         func request(_ path: String, timeout: Double = 2) -> URLRequest {
             var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/\(path)")!)
             request.timeoutInterval = timeout
@@ -37,10 +35,8 @@ struct HTTPTests {
             return request
         }
         let ok = try await HTTPTransport.send(request("ok"), limit: 10)
-        try trace("received ok")
         #expect(ok.status == 200 && ok.body.count == 2)
         let redirect = try await HTTPTransport.send(request("redirect"), limit: 10)
-        try trace("received redirect")
         #expect(redirect.status == 302)
         for path in ["length", "body"] {
             do { _ = try await HTTPTransport.send(request(path), limit: 10); Issue.record("Expected size rejection") }
@@ -52,6 +48,5 @@ struct HTTPTests {
         let task = Task { try await HTTPTransport.send(request("slow"), limit: 10) }
         task.cancel()
         await #expect(throws: (any Error).self) { _ = try await task.value }
-        try trace("requests completed")
     }
 }

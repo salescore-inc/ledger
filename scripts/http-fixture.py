@@ -1,6 +1,8 @@
 import http.server
 import time
 import signal
+import pathlib
+import sys
 
 # Swift Testing on Linux can pass a blocked SIGTERM mask to child processes.
 signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
@@ -32,5 +34,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             pass
 
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-print(server.server_port, flush=True)
+if len(sys.argv) == 2:
+    pathlib.Path(sys.argv[1]).write_text(str(server.server_port))
+else:
+    print(server.server_port, flush=True)
 server.serve_forever()
