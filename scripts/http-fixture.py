@@ -4,6 +4,8 @@ import signal
 
 # Swift Testing on Linux can pass a blocked SIGTERM mask to child processes.
 signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+# Test hosts can also inherit an ignored disposition; termination must reap this fixture.
+signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
