@@ -15,11 +15,11 @@ struct Command {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
             if args == ["--help"] {
-                print("Usage: ledger append <absolute-jsonl-path> --id <uuid> < record.json")
+                print(CommandArguments.usage)
                 print("Configuration: LEDGER_CONFIG or /etc/ledger.json")
                 return
             }
-            guard args.count == 4, args[0] == "append", args[2] == "--id" else { throw CLIError(code: "invalid_input", message: "Usage: ledger append <absolute-jsonl-path> --id <uuid> < record.json") }
+            let arguments = try CommandArguments(args)
             stage = "configuration"
             let configPath = ProcessInfo.processInfo.environment["LEDGER_CONFIG"] ?? "/etc/ledger.json"
             let configFile = try FileHandle(forReadingFrom: URL(fileURLWithPath: configPath))
@@ -31,16 +31,16 @@ struct Command {
             catch { throw CLIError(code: "invalid_config") }
             try config.validate()
             stage = "path"
-            let object = try config.objectName(for: args[1])
+            let object = try config.objectName(for: arguments.path)
             let budget = Budget(seconds: config.timeoutSeconds)
             stage = "input"
             let input = try readInput(limit: config.maxRecordBytes, budget: budget)
-            let record = try JSONRecord(input: input, id: args[3], limit: config.maxRecordBytes)
+            let record = try JSONRecord(input: input, id: arguments.operationID, limit: config.maxRecordBytes)
             stage = "authentication"
             let token = try await CloudObjectStore.accessToken(configuration: config, budget: budget)
             let store = CloudObjectStore(bucket: config.bucket, object: object, token: token, maxFileBytes: config.maxFileBytes)
             stage = "append"
-            let receipt = try await Appender(store: store, maxFileBytes: config.maxFileBytes, maxAttempts: config.maxAttempts).append(record, budget: budget)
+            let receipt = try await Appender(store: store, maxFileBytes: config.maxFileBytes, maxAttempts: config.maxAttempts).append(record, expectedGeneration: arguments.expectedGeneration, budget: budget)
             committed = true
             stage = "receipt"
             var output = try JSONEncoder().encode(receipt)

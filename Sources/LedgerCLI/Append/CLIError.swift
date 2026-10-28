@@ -42,6 +42,9 @@ struct CLIError: Error, Sendable, Encodable {
         case "contention":
             self.message = "Concurrent writes exhausted the attempt budget. Retry with backoff using the same ID and exact input."
             retryAction = "retry_same_request"
+        case "generation_mismatch":
+            self.message = "The observed generation changed. Read and revalidate current state before choosing a new expected generation; retain the operation ID and exact input."
+            retryAction = "revalidate"
         case "outcome_unknown":
             self.message = "An upload may have committed. Retry only with the same ID and exact input to confirm it."
             retryAction = "retry_same_request"
@@ -62,7 +65,7 @@ struct CLIError: Error, Sendable, Encodable {
         switch code {
         case "invalid_input", "invalid_path", "invalid_config": 2
         case "id_conflict", "invalid_log": 3
-        case "contention": 4
+        case "contention", "generation_mismatch": 4
         case "outcome_unknown": 6
         default: 5
         }

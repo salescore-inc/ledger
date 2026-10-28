@@ -88,3 +88,33 @@ if its existing budget has expired. Writes remain `.jsonl` only. Separate siblin
 
 `LegacyJSONTests` owns conversion, exact payload preservation, deterministic
 identity, competing first appends, replay, size rejection and corrupt-log refusal.
+
+## Generation Precondition
+
+`ExpectedGeneration` owns canonical decimal validation, including `0` for
+creation. It is immutable and Sendable; no target-dependent state is introduced.
+`CommandArguments` parses the optional flag and passes the value to `Appender`.
+
+For every observed snapshot, `Appender` validates the full normalized log and
+checks operation identity before comparing the optional expected generation.
+A confirmed identical operation is `already_present`, including after a lost
+acknowledgment or subsequent unrelated append. A legacy-derived envelope is
+never mistaken for a committed operation. A mismatched generation fails before
+upload; a disappearing pinned read or upload HTTP 412 also returns
+`generation_mismatch` immediately. It never retries a new write against a
+generation the caller has not validated. The existing unconditioned mode keeps
+its internal rebase/retry behavior.
+
+An ambiguous upload can be reconciled by reading the same ID/hash. If absent,
+only another upload against the original expected generation is permitted.
+A subsequent mismatch, denial, read failure, deadline or cancellation preserves
+`outcome_unknown` until commitment is confirmed. Final reconciliation never
+uploads. All retries consume the original Budget and maxAttempts; no lock,
+worker, callback, shared state or independent retry budget is added.
+
+`ExpectedGenerationTests` owns matching/stale/absent generations, forced
+concurrent CAS, identical/different replay, ambiguous upload reconciliation,
+legacy normalization and byte preservation. Cloud adapter fixtures verify the
+actual generation-pinned requests and conditional uploads. The binary smoke
+test verifies argument parsing and structured failures in the real executable.
+Package integration retains all ordinary append, legacy and HTTP tests.

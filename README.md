@@ -17,6 +17,15 @@ the REST API for conditional writes. It has no Storage SDK, daemon or database.
 Payload meaning and domain schema belong to the caller. POSIX files and other
 storage providers are not supported by this backend.
 
+Callers that validate existing contents before appending can add
+`--expected-generation <generation>`. Use `0` for creation. Ledger confirms an
+identical already-committed operation first, otherwise writes only against that
+generation. `generation_mismatch` with `retryAction: revalidate` requires a fresh
+read and caller validation; this mode never rebases onto another generation.
+Keep the same operation UUID and exact input bytes when reconciling an unknown
+upload outcome. Ordinary append without the flag retains its current retries.
+See the [generation-bound contract](DESIGN.md#generation-bound-append).
+
 An existing `.jsonl` object may contain a legacy single JSON object. Its first
 successful append converts that object to one preserved envelope and adds the
 new record in the same conditional upload. Pretty-printed JSON is supported;
