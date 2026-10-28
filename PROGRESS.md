@@ -9,3 +9,7 @@
 
 - [x] LREL1 Published v0.1.1 from f8536d80aaf3dc9b6688ea640a387562fddc58da; tag and origin/main matched at tag push; both native CI targets and release assembler passed `depends:none` `parallel:none`
 - [x] LREL2 Downloaded and verified both immutable archives, manifests and hashes with the upstream assembler; Formula matches the verified generated v0.1.1 asset `depends:LREL1` `parallel:none`
+
+- [x] EG1 Define opt-in generation-bound append, replay precedence, caller revalidation and sticky uncertain outcomes; latest origin/main base explicitly authorized `depends:none` `parallel:none`
+- [x] EG2 Implement CLI parsing and conditional append; generation races, replay, legacy and actual cloud request construction verified; native Swift 6.4.0 package run passed all 37 tests and release binary smoke passed `depends:EG1` `parallel:none`
+- [x] EG3 Scoped review passed; Swift 6.4.0 macOS 37 tests/release smoke and Linux 37 tests/static amd64 smoke passed, plus 5 packaging tests; evidence in .build/expected-generation-native.log and .build/expected-generation-linux.log; coherent task commit on codex/ledger-expected-generation-20261028, no upstream configured or release/deploy performed `depends:EG2` `parallel:none`

@@ -104,6 +104,8 @@ one payload. The CLI treats the whole payload as one atomic append.
 - The cloud object exposes complete generations, not a half-uploaded record.
 - Repeating one ID with the same bytes confirms the existing commit; changing
   its bytes returns `id_conflict`.
+- Callers that validate an observed generation can bind an append to that
+  generation using the optional precondition defined below.
 - Existing JSONL is append-only. No truncate, delete, graph merge or compaction
   is supported. The legacy representation conversion below preserves its payload.
 - A canonical `.jsonl` object may initially contain one legacy JSON object.
@@ -113,6 +115,31 @@ one payload. The CLI treats the whole payload as one atomic append.
   and the requested record together; it introduces no separate migration write.
 - Guarantees require every writer to follow this protocol. Existing writable
   mounts and shared workload credentials do not prevent deliberate bypass.
+
+### Generation-bound append
+
+`ledger append <absolute-jsonl-path> --id <operation-uuid> --expected-generation <generation>`
+adds an optional generation precondition without changing ordinary append.
+Options may appear in either order, once each. A generation is `0` for an
+absent object or a canonical positive decimal string; it remains a string and
+is never narrowed to a machine integer. The caller owns validation of the
+observed payload and must retain its operation UUID and exact input bytes.
+
+The [Append component](Sources/LedgerCLI/Append/DESIGN.md#generation-precondition)
+owns comparison, upload and reconciliation ordering. A new write is admitted
+only against the specified generation. After log/operation validation, a changed
+generation or an upload precondition failure returns `generation_mismatch` without rebasing
+onto another generation. Its `retryAction: revalidate` tells the caller to read
+and validate current state before choosing a new generation. This is not a
+domain validator, lock or transaction across sibling objects.
+
+An already committed identical operation returns `already_present` even when
+the caller's expected generation is older. A different payload under the same
+operation ID remains `id_conflict`. Any unresolved upload keeps the sticky
+`outcome_unknown` contract, including when a later generation changes; such a
+failure must not claim `not_written`. Both modes share the existing timeout,
+attempt, byte and request budgets. Plain-JSON normalization remains supported
+and can only commit with the specified canonical object's generation.
 
 ### Output and errors
 
@@ -125,6 +152,7 @@ for a confirmed commit. Diagnostics go to stderr without payloads or credentials
 | 2 | `invalid_input` / `invalid_path` | Nothing written; correct input |
 | 3 | `id_conflict` / `invalid_log` | Stop; do not repair or overwrite implicitly |
 | 4 | `contention` | Only precondition failures observed; retry same ID/input |
+| 4 | `generation_mismatch` | Nothing written by this invocation; reread and revalidate before choosing another generation |
 | 5 | `access_denied` / `io_error` / `limit_exceeded` | Explicit failure; no alternate storage fallback |
 | 6 | `outcome_unknown` | Upload might have committed; retry identical ID/input |
 
@@ -147,6 +175,10 @@ error code: do not report definitely-uncommitted failure after an ambiguous uplo
    reread and repeat with the same ID/input under the invocation deadline.
 8. After timeout/disconnect during upload, reread and check the ID before another
    attempt. Return `outcome_unknown` if the deadline prevents confirmation.
+
+With an expected generation, step 4 confirms any identical committed operation
+first, then compares generations before preparing a new write. A mismatch or
+HTTP 412 returns to caller validation instead of step 7's ordinary rebase.
 
 ```text
 A reads v7 ── commits record A as v8
@@ -245,6 +277,8 @@ are byte counts; streaming rejection reports the observed count, not total size.
 No input fragments, credentials or raw provider errors appear in diagnostics.
 `retry_same_request` requires the same operation ID and exact input bytes;
 `correct_input` permits fixing a rejected input; `stop` requires operator action.
+`revalidate` requires caller validation as defined by the
+[generation-bound contract](#generation-bound-append).
 `not_written` describes this invocation only, not whether an earlier retry
 committed. Unresolved uploads always report `unknown`; receipt-output failures
 after confirmation report `committed`. JSON validation precedes authentication.

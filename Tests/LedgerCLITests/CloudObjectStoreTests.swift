@@ -89,6 +89,78 @@ struct CloudObjectStoreTests {
         #expect(try item.isPresent(in: upload))
     }
 
+    @Test func expectedGenerationUsesTheActualPinnedReadAndUpload() async throws {
+        let fixture = StoreHTTPFixture(missingBodies: 0)
+        let item = try record()
+        let writer = Appender(store: makeStore(fixture), maxFileBytes: 1024, maxAttempts: 3)
+        let expected = try ExpectedGeneration("1")
+        let receipt = try await writer.append(item, expectedGeneration: expected, budget: Budget(seconds: 5))
+        #expect(receipt.status == "appended")
+        #expect(await fixture.count == 3)
+        #expect(await fixture.lastUpload == item.line)
+    }
+
+    @Test func conditionalCreationUsesZeroForAnAbsentCloudObject() async throws {
+        let fixture = StoreHTTPFixture(missingBodies: 0, absentObject: true)
+        let item = try record()
+        let expected = try ExpectedGeneration("0")
+        let writer = Appender(store: makeStore(fixture), maxFileBytes: 1024, maxAttempts: 3)
+        let receipt = try await writer.append(item, expectedGeneration: expected, budget: Budget(seconds: 5))
+        #expect(receipt.status == "appended")
+        #expect(await fixture.count == 2)
+        #expect(await fixture.lastUpload == item.line)
+    }
+
+    @Test func conditionalUploadConflictReturnsToCallerWithoutAnotherReadOrUpload() async throws {
+        let fixture = StoreHTTPFixture(missingBodies: 0, rejectUpload: true)
+        let writer = Appender(store: makeStore(fixture), maxFileBytes: 1024, maxAttempts: 3)
+        let item = try record()
+        let expected = try ExpectedGeneration("1")
+        do {
+            _ = try await writer.append(item, expectedGeneration: expected, budget: Budget(seconds: 5))
+            Issue.record("HTTP 412 must require caller validation")
+        } catch let error as CLIError {
+            #expect(error.code == "generation_mismatch")
+            #expect(error.retryAction == "revalidate")
+            #expect(error.commitState == "not_written")
+            #expect(error.stage == "upload")
+        }
+        #expect(await fixture.count == 3)
+        #expect(await fixture.uploads == 1)
+    }
+
+    @Test func disappearingConditionalReadDoesNotUploadOrRebase() async throws {
+        let fixture = StoreHTTPFixture(missingBodies: 1)
+        let writer = Appender(store: makeStore(fixture), maxFileBytes: 1024, maxAttempts: 3)
+        let item = try record()
+        let expected = try ExpectedGeneration("1")
+        do {
+            _ = try await writer.append(item, expectedGeneration: expected, budget: Budget(seconds: 5))
+            Issue.record("A lost pinned generation requires caller validation")
+        } catch let error as CLIError {
+            #expect(error.code == "generation_mismatch")
+            #expect(error.commitState == "not_written")
+        }
+        #expect(await fixture.count == 2)
+        #expect(await fixture.uploads == 0)
+    }
+
+    @Test func uncertainConditionalUploadThenMissingReadRemainsUnknown() async throws {
+        let fixture = StoreHTTPFixture(missingBodies: 0, loseUpload: true)
+        let writer = Appender(store: makeStore(fixture), maxFileBytes: 1024, maxAttempts: 3)
+        let item = try record()
+        let expected = try ExpectedGeneration("1")
+        do {
+            _ = try await writer.append(item, expectedGeneration: expected, budget: Budget(seconds: 5))
+            Issue.record("An ambiguous upload must not become a generation rejection")
+        } catch let error as CLIError {
+            #expect(error.code == "outcome_unknown")
+            #expect(error.commitState == "unknown")
+        }
+        #expect(await fixture.count == 5)
+        #expect(await fixture.uploads == 1)
+    }
+
     private func makeStore(_ fixture: StoreHTTPFixture) -> CloudObjectStore {
         CloudObjectStore(bucket: "test-bucket", object: "folder/日本語 #?.jsonl", token: "test-only-token", maxFileBytes: 1024, send: { request, limit in
             try await fixture.send(request, limit: limit)
@@ -107,11 +179,15 @@ private actor StoreHTTPFixture {
     var metadataReads = 0
     var missingBodies: Int
     let loseUpload: Bool
+    let rejectUpload: Bool
+    let absentObject: Bool
     let initialBytes: Data
 
-    init(missingBodies: Int, loseUpload: Bool = false, initialBytes: Data = Data()) {
+    init(missingBodies: Int, loseUpload: Bool = false, initialBytes: Data = Data(), rejectUpload: Bool = false, absentObject: Bool = false) {
         self.missingBodies = missingBodies; self.loseUpload = loseUpload
         self.initialBytes = initialBytes
+        self.rejectUpload = rejectUpload
+        self.absentObject = absentObject
     }
 
     func send(_ request: URLRequest, limit: Int) throws -> HTTPResponse {
@@ -128,10 +204,11 @@ private actor StoreHTTPFixture {
             lastUpload = request.httpBody
             #expect(url.path == "/upload/storage/v1/b/test-bucket/o")
             #expect(query["name"] == "folder/日本語 #?.jsonl")
-            #expect(query["ifGenerationMatch"] == String(metadataReads))
+            #expect(query["ifGenerationMatch"] == (absentObject ? "0" : String(metadataReads)))
             #expect(query["uploadType"] == "media")
             #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/x-ndjson")
             if loseUpload { throw CLIError(code: "io_error") }
+            if rejectUpload { return HTTPResponse(status: 412, body: Data()) }
             return HTTPResponse(status: 200, body: Data("{\"generation\":\"\(metadataReads + 1)\"}".utf8))
         }
         #expect(url.path == "/storage/v1/b/test-bucket/o/folder/日本語 #?.jsonl")
@@ -145,6 +222,7 @@ private actor StoreHTTPFixture {
         }
         metadataReads += 1
         #expect(query["fields"] == "generation,size")
+        if absentObject { return HTTPResponse(status: 404, body: Data()) }
         return HTTPResponse(status: 200, body: Data("{\"generation\":\"\(metadataReads)\",\"size\":\"\(initialBytes.count)\"}".utf8))
     }
 }

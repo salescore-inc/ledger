@@ -27,7 +27,8 @@ struct Appender {
     let maxFileBytes: Int
     let maxAttempts: Int
 
-    func append(_ record: JSONRecord, budget: Budget) async throws -> Receipt {
+    func append(_ record: JSONRecord, expectedGeneration: ExpectedGeneration? = nil,
+                budget: Budget) async throws -> Receipt {
         var uncertain = false
         var stage = "read"
         for attempt in 0..<maxAttempts {
@@ -37,6 +38,7 @@ struct Appender {
                 let snapshot: Snapshot
                 do { snapshot = try await store.read(budget: budget) }
                 catch let error as CLIError where error.code == "contention" {
+                    if expectedGeneration != nil { throw CLIError(code: "generation_mismatch") }
                     if attempt + 1 < maxAttempts { try await backoff(after: attempt, budget: budget) }
                     continue
                 }
@@ -48,6 +50,10 @@ struct Appender {
                     guard log == snapshot.bytes else { throw CLIError(code: "id_conflict") }
                     return Receipt(status: "already_present", id: record.id, generation: snapshot.generation)
                 }
+                stage = "validate_generation"
+                if let expectedGeneration, snapshot.generation != expectedGeneration.rawValue {
+                    throw CLIError(code: "generation_mismatch")
+                }
                 // An uncertain request can still finish later, so keep its sticky state.
                 stage = "prepare_append"
                 let line = record.line
@@ -55,17 +61,23 @@ struct Appender {
                 var next = log
                 next.append(line)
                 try budget.check()
+                let result: PutResult?
                 do {
                     stage = "upload"
-                    switch try await store.put(next, generation: snapshot.generation, budget: budget) {
-                    case .committed(let generation):
-                        return Receipt(status: "appended", id: record.id, generation: generation)
-                    case .conflict: break
-                    }
+                    result = try await store.put(next, generation: snapshot.generation, budget: budget)
                 } catch let rejected as WriteRejected {
                     throw rejected.failure
                 } catch {
                     uncertain = true
+                    result = nil
+                }
+                if let result {
+                    switch result {
+                    case .committed(let generation):
+                        return Receipt(status: "appended", id: record.id, generation: generation)
+                    case .conflict:
+                        if expectedGeneration != nil { throw CLIError(code: "generation_mismatch") }
+                    }
                 }
                 if attempt + 1 < maxAttempts {
                     try await backoff(after: attempt, budget: budget)

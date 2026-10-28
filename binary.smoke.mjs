@@ -43,6 +43,26 @@ try {
   assert.equal(failure.stage, 'input');
   assert.equal(failure.retryAction, 'correct_input');
   assert.equal(failure.commitState, 'not_written');
+  const conditional = spawnSync(binary, ['append', join(root, 'graph.jsonl'), '--id',
+    '6e8b4332-0d5c-4f69-9d9d-516c0a2c65dd', '--expected-generation', '0'], {
+    input: '{"broken":}', encoding: 'utf8', timeout: 10000,
+    env: { ...process.env, LEDGER_CONFIG: config },
+  });
+  assert.equal(conditional.error, undefined);
+  assert.equal(conditional.status, 2);
+  assert.equal(JSON.parse(conditional.stderr).stage, 'input',
+    'A valid generation flag must reach input validation');
+  const invalid = spawnSync(binary, ['append', join(root, 'graph.jsonl'),
+    '--expected-generation', '01', '--id', '6e8b4332-0d5c-4f69-9d9d-516c0a2c65dd'], {
+    input: '{}', encoding: 'utf8', timeout: 10000,
+    env: { ...process.env, LEDGER_CONFIG: join(root, 'missing-config') },
+  });
+  assert.equal(invalid.error, undefined);
+  assert.equal(invalid.status, 2);
+  const invalidFailure = JSON.parse(invalid.stderr);
+  assert.equal(invalidFailure.code, 'invalid_input');
+  assert.equal(invalidFailure.stage, 'arguments');
+  assert.equal(invalidFailure.commitState, 'not_written');
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
